@@ -7,7 +7,7 @@
 
 # Use NVIDIA CUDA as base image and run the same installation as in the other packages.
 # The version of cudatoolkit must match those of the base image, see Dockerfile.pytorch
-FROM nvidia/cuda:10.1-cudnn7-runtime-ubuntu18.04
+FROM nvidia/cuda:11.0.3-cudnn8-runtime-ubuntu20.04
 LABEL authors="Christoph Schranz <christoph.schranz@salzburgresearch.at>, Mathematical Michael <consistentbayes@gmail.com>"
 # This is a concatenated Dockerfile, the maintainers of subsequent sections may vary.
 RUN chmod 1777 /tmp && chmod 1777 /var/tmp
@@ -67,6 +67,7 @@ RUN apt-get update \
     locales \
     fonts-liberation \
     run-one \
+    npm \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
@@ -148,7 +149,7 @@ RUN wget --quiet "https://github.com/conda-forge/miniforge/releases/download/${m
 # files across image layers when the permissions change
 RUN conda install --quiet --yes \
     'notebook=6.1.6' \
-    'jupyterhub=1.3.0' \
+#    'jupyterhub=1.3.0' \
     'jupyterlab=2.2.9' && \
     conda clean --all -f -y && \
     npm cache clean --force && \
@@ -269,6 +270,7 @@ RUN conda install --quiet --yes \
     'vincent=0.4.*' \
     'widgetsnbextension=3.5.*'\
     'xlrd=1.2.*' \
+    'jupyterlab-nvdashboard=0.4.*' \
     && \
     conda clean --all -f -y && \
     # Activate ipywidgets extension in the environment that runs the notebook server
@@ -279,6 +281,7 @@ RUN conda install --quiet --yes \
     jupyter labextension install @jupyter-widgets/jupyterlab-manager@^2.0.0 --no-build && \
     jupyter labextension install @bokeh/jupyter_bokeh@^2.0.0 --no-build && \
     jupyter labextension install jupyter-matplotlib@^0.7.2 --no-build && \
+    jupyter labextension install jupyterlab-nvdashboard --no-build && \
     jupyter lab build -y && \
     jupyter lab clean -y && \
     npm cache clean --force && \
@@ -305,6 +308,107 @@ USER $NB_UID
 
 WORKDIR $HOME
 
+  ############################################################################
+  ################ Dependency: jupyter/datascience-notebook ##################
+  ############################################################################
+  
+# Copyright (c) Jupyter Development Team.
+# Distributed under the terms of the Modified BSD License.
+
+LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
+
+# Set when building on Travis so that certain long-running build steps can
+# be skipped to shorten build time.
+ARG TEST_ONLY_BUILD
+
+# Fix DL4006
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+USER root
+
+# Julia installation
+# Default values can be overridden at build time
+# (ARGS are in lower case to distinguish them from ENV)
+# Check https://julialang.org/downloads/
+ARG julia_version="1.5.3"
+# SHA256 checksum
+ARG julia_checksum="f190c938dd6fed97021953240523c9db448ec0a6760b574afd4e9924ab5615f1"
+
+# R pre-requisites
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+    fonts-dejavu \
+    gfortran \
+    gcc && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Julia dependencies
+# install Julia packages in /opt/julia instead of $HOME
+ENV JULIA_DEPOT_PATH=/opt/julia \
+    JULIA_PKGDIR=/opt/julia \
+    JULIA_VERSION="${julia_version}"
+
+WORKDIR /tmp
+
+# hadolint ignore=SC2046
+RUN mkdir "/opt/julia-${JULIA_VERSION}" && \
+    wget -q https://julialang-s3.julialang.org/bin/linux/x64/$(echo "${JULIA_VERSION}" | cut -d. -f 1,2)"/julia-${JULIA_VERSION}-linux-x86_64.tar.gz" && \
+    echo "${julia_checksum} *julia-${JULIA_VERSION}-linux-x86_64.tar.gz" | sha256sum -c - && \
+    tar xzf "julia-${JULIA_VERSION}-linux-x86_64.tar.gz" -C "/opt/julia-${JULIA_VERSION}" --strip-components=1 && \
+    rm "/tmp/julia-${JULIA_VERSION}-linux-x86_64.tar.gz"
+RUN ln -fs /opt/julia-*/bin/julia /usr/local/bin/julia
+
+# Show Julia where conda libraries are \
+RUN mkdir /etc/julia && \
+    echo "push!(Libdl.DL_LOAD_PATH, \"$CONDA_DIR/lib\")" >> /etc/julia/juliarc.jl && \
+    # Create JULIA_PKGDIR \
+    mkdir "${JULIA_PKGDIR}" && \
+    chown "${NB_USER}" "${JULIA_PKGDIR}" && \
+    fix-permissions "${JULIA_PKGDIR}"
+
+USER $NB_UID
+
+# R packages including IRKernel which gets installed globally.
+RUN conda install --quiet --yes \
+    'r-base=4.0.3'  \
+    'r-caret=6.0*' \
+    'r-crayon=1.3*' \
+    'r-devtools=2.3*' \
+    'r-forecast=8.13*' \ 
+    'r-hexbin=1.28*' \
+    'r-htmltools=0.5*' \
+    'r-htmlwidgets=1.5*' \ 
+    'r-irkernel=1.1*' \
+    'r-nycflights13=1.0*' \
+    'r-randomforest=4.6*' \
+    'r-rcurl=1.98*' \
+    'r-rmarkdown=2.6*' \
+    'r-rsqlite=2.2*' \
+    'r-shiny=1.5*' \
+    'r-tidyverse=1.3*' \
+    'rpy2=3.3*' && \
+    conda clean --all -f -y && \
+    fix-permissions "${CONDA_DIR}" && \
+    fix-permissions "/home/${NB_USER}"
+
+# Add Julia packages. Only add HDF5 if this is not a test-only build since
+# it takes roughly half the entire build time of all of the images on Travis
+# to add this one package and often causes Travis to timeout.
+#
+# Install IJulia as jovyan and then move the kernelspec out
+# to the system share location. Avoids problems with runtime UID change not
+# taking effect properly on the .local folder in the jovyan home dir.
+RUN julia -e 'import Pkg; Pkg.update()' && \
+    (test $TEST_ONLY_BUILD || julia -e 'import Pkg; Pkg.add("HDF5")') && \
+    julia -e "using Pkg; pkg\"add IJulia\"; pkg\"precompile\"" && \
+    # move kernelspec out of home \
+    mv "${HOME}/.local/share/jupyter/kernels/julia"* "${CONDA_DIR}/share/jupyter/kernels/" && \
+    chmod -R go+rx "${CONDA_DIR}/share/jupyter" && \
+    rm -rf "${HOME}/.local" && \
+    fix-permissions "${JULIA_PKGDIR}" "${CONDA_DIR}/share/jupyter"
+
+WORKDIR $HOME
+
 ############################################################################
 ########################## Dependency: gpulibs #############################
 ############################################################################
@@ -322,12 +426,12 @@ RUN conda install --quiet --yes \
     pyyaml mkl mkl-include setuptools cmake cffi typing
 
 # Check compatibility here: https://pytorch.org/get-started/locally/
-RUN conda install --quiet --yes \
-     pytorch \ 
-     torchvision \
-     cudatoolkit=10.1 -c pytorch
+#RUN conda install --quiet --yes \
+#     pytorch \ 
+#     torchvision \
+#     cudatoolkit=11.0 -c pytorch
 #    pip install torch_nightly -f https://download.pytorch.org/whl/nightly/cu90/torch_nightly.html && \
-RUN pip install  --no-cache-dir torchviz
+#RUN pip install  --no-cache-dir torchviz
 
 
 # Clean installation
@@ -345,14 +449,19 @@ USER root
 
 RUN pip install --no-cache-dir ipyleaflet plotly==4.8.* "ipywidgets>=7.5"
 
+#RUN curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/7fa2af80.pub" |  apt-key add -
+#RUN echo "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/" | tee /etc/apt/sources.list.d/cuda.list
+#RUN echo "deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu2004/x86_64/" | tee /etc/apt/sources.list.d/nvidia-ml.list
+#RUN cat /etc/apt/sources.list.d/nvidia-ml.list
+
 # Install important packages and Graphviz
-RUN set -ex \
- && buildDeps=' \
-    graphviz==0.11 \
-' \
- && apt-get update \
- && apt-get -y install htop apt-utils graphviz libgraphviz-dev openssh-client \
- && pip install --no-cache-dir $buildDeps
+#RUN set -ex \
+# && buildDeps=' \
+#    graphviz==0.11 \
+#' \
+ #&& apt-get update \
+ #&& apt-get -y install htop apt-utils graphviz libgraphviz-dev openssh-client \
+ #&& pip install --no-cache-dir $buildDeps
 
 # Install various extensions
 RUN fix-permissions $CONDA_DIR
