@@ -28,6 +28,7 @@ RUN pip install --no-cache-dir jupyter_contrib_nbextensions \
   jupyter_nbextensions_configurator rise
 #  jupyter nbextension enable codefolding/main
 RUN jupyter labextension install @ijmbarr/jupyterlab_spellchecker
+RUN jupyter labextension install jupyterlab-nvdashboard --no-build && \
 
 RUN fix-permissions /home/$NB_USER
 
