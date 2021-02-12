@@ -19,9 +19,9 @@ RUN conda install --quiet --yes cudatoolkit=11.0
 #RUN pip install  --no-cache-dir torchviz
 
 RUN conda install --quiet --yes \
-    rapidsai=0.17 \
-    rapids-blazing=0.17
-
+    rapidsai=0.17  \
+    -c rapidsai -c nvidia -c conda-forge \
+    -c defaults rapids-blazing=0.17
 RUN conda 
 # Clean installation
 RUN conda clean --all -f -y && \
