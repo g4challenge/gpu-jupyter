@@ -18,9 +18,9 @@ RUN conda install --quiet --yes cudatoolkit=11.0
 #    pip install torch_nightly -f https://download.pytorch.org/whl/nightly/cu90/torch_nightly.html && \
 #RUN pip install  --no-cache-dir torchviz
 
-RUN conda install --quet --yes \
-    rapidsai \
-    rapids-blazing=0.17
+RUN conda install --quiet --yes -c rapidsai \ 
+    rapids \
+    rapids-blazing=0.18
 
 RUN conda 
 # Clean installation
