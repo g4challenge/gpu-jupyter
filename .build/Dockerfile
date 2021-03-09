@@ -7,8 +7,8 @@
 
 # Use NVIDIA CUDA as base image and run the same installation as in the other packages.
 # The version of cudatoolkit must match those of the base image, see Dockerfile.pytorch
-FROM nvidia/cuda:11.0.3-cudnn8-runtime-ubuntu20.04
-LABEL authors="Christoph Schranz <christoph.schranz@salzburgresearch.at>, Mathematical Michael <consistentbayes@gmail.com>"
+FROM nvidia/cuda:11.1-cudnn8-runtime-ubuntu20.04
+LABEL authors="Lukas Huber <lukas.huber@fh-kufstein.ac.at>, Christoph Schranz <christoph.schranz@salzburgresearch.at>, Mathematical Michael <consistentbayes@gmail.com>"
 # This is a concatenated Dockerfile, the maintainers of subsequent sections may vary.
 RUN chmod 1777 /tmp && chmod 1777 /var/tmp
 
@@ -67,7 +67,6 @@ RUN apt-get update \
     locales \
     fonts-liberation \
     run-one \
-    npm \
  && apt-get clean && rm -rf /var/lib/apt/lists/*
 
 RUN echo "en_US.UTF-8 UTF-8" > /etc/locale.gen && \
@@ -149,7 +148,7 @@ RUN wget --quiet "https://github.com/conda-forge/miniforge/releases/download/${m
 # files across image layers when the permissions change
 RUN conda install --quiet --yes \
     'notebook=6.1.6' \
-#    'jupyterhub=1.3.0' \
+    'jupyterhub=1.3.0' \
     'jupyterlab=2.2.9' && \
     conda clean --all -f -y && \
     npm cache clean --force && \
@@ -270,7 +269,6 @@ RUN conda install --quiet --yes \
     'vincent=0.4.*' \
     'widgetsnbextension=3.5.*'\
     'xlrd=1.2.*' \
-    'jupyterlab-nvdashboard=0.4.*' \
     && \
     conda clean --all -f -y && \
     # Activate ipywidgets extension in the environment that runs the notebook server
@@ -281,7 +279,6 @@ RUN conda install --quiet --yes \
     jupyter labextension install @jupyter-widgets/jupyterlab-manager@^2.0.0 --no-build && \
     jupyter labextension install @bokeh/jupyter_bokeh@^2.0.0 --no-build && \
     jupyter labextension install jupyter-matplotlib@^0.7.2 --no-build && \
-    jupyter labextension install jupyterlab-nvdashboard --no-build && \
     jupyter lab build -y && \
     jupyter lab clean -y && \
     npm cache clean --force && \
@@ -418,7 +415,7 @@ LABEL maintainer="Christoph Schranz <christoph.schranz@salzburgresearch.at>"
 # Install Tensorflow, check compatibility here: https://www.tensorflow.org/install/gpu
 # installation via conda leads to errors in version 4.8.2
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir "tensorflow==2.3.2" && \
+    pip install --no-cache-dir "tensorflow==2.4.1" && \
     pip install --no-cache-dir keras
 
 # Install PyTorch with dependencies
@@ -426,14 +423,18 @@ RUN conda install --quiet --yes \
     pyyaml mkl mkl-include setuptools cmake cffi typing
 
 # Check compatibility here: https://pytorch.org/get-started/locally/
-#RUN conda install --quiet --yes \
+RUN conda install --quiet --yes cudatoolkit=11.0
 #     pytorch \ 
 #     torchvision \
-#     cudatoolkit=11.0 -c pytorch
+     
 #    pip install torch_nightly -f https://download.pytorch.org/whl/nightly/cu90/torch_nightly.html && \
 #RUN pip install  --no-cache-dir torchviz
 
+RUN conda install --quet --yes \
+    rapidsai \
+    rapids-blazing=0.17
 
+RUN conda 
 # Clean installation
 RUN conda clean --all -f -y && \
     fix-permissions $CONDA_DIR && \
@@ -449,19 +450,14 @@ USER root
 
 RUN pip install --no-cache-dir ipyleaflet plotly==4.8.* "ipywidgets>=7.5"
 
-#RUN curl -fsSL "https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/7fa2af80.pub" |  apt-key add -
-#RUN echo "deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/" | tee /etc/apt/sources.list.d/cuda.list
-#RUN echo "deb https://developer.download.nvidia.com/compute/machine-learning/repos/ubuntu2004/x86_64/" | tee /etc/apt/sources.list.d/nvidia-ml.list
-#RUN cat /etc/apt/sources.list.d/nvidia-ml.list
-
 # Install important packages and Graphviz
-#RUN set -ex \
-# && buildDeps=' \
-#    graphviz==0.11 \
-#' \
- #&& apt-get update \
- #&& apt-get -y install htop apt-utils graphviz libgraphviz-dev openssh-client \
- #&& pip install --no-cache-dir $buildDeps
+RUN set -ex \
+ && buildDeps=' \
+    graphviz==0.11 \
+' \
+ && apt-get update \
+ && apt-get -y install htop apt-utils graphviz libgraphviz-dev openssh-client \
+ && pip install --no-cache-dir $buildDeps
 
 # Install various extensions
 RUN fix-permissions $CONDA_DIR
@@ -478,6 +474,7 @@ RUN pip install --no-cache-dir jupyter_contrib_nbextensions \
   jupyter_nbextensions_configurator rise
 #  jupyter nbextension enable codefolding/main
 RUN jupyter labextension install @ijmbarr/jupyterlab_spellchecker
+RUN jupyter labextension install jupyterlab-nvdashboard --no-build && \
 
 RUN fix-permissions /home/$NB_USER
 
