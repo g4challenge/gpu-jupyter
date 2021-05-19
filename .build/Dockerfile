@@ -22,7 +22,7 @@ RUN chmod 1777 /tmp && chmod 1777 /var/tmp
 # Ubuntu 20.04 (focal)
 # https://hub.docker.com/_/ubuntu/?tab=tags&name=focal
 # OS/ARCH: linux/amd64
-ARG ROOT_CONTAINER=ubuntu:focal-20201106@sha256:4e4bc990609ed865e07afc8427c30ffdddca5153fd4e82c20d8f0783a291e241
+ARG ROOT_CONTAINER=ubuntu:focal-20210217@sha256:e3d7ff9efd8431d9ef39a144c45992df5502c995b9ba3c53ff70c5b52a848d9c
 
 
 LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
@@ -42,24 +42,25 @@ USER root
 # Conda version
 ARG conda_version="4.9.2"
 # Miniforge installer patch version
-ARG miniforge_patch_number="0"
+ARG miniforge_patch_number="7"
 # Miniforge installer architecture
 ARG miniforge_arch="x86_64"
-# Python implementation to use 
-# can be either Miniforge3 to use Python or Miniforge-pypy3 to use PyPy
-ARG miniforge_python="Miniforge3"
+# Package Manager and Python implementation to use (https://github.com/conda-forge/miniforge)
+# - conda only: either Miniforge3 to use Python or Miniforge-pypy3 to use PyPy
+# - conda + mamba: either Mambaforge to use Python or Mambaforge-pypy3 to use PyPy
+ARG miniforge_python="Mambaforge"
 
 # Miniforge archive to install
 ARG miniforge_version="${conda_version}-${miniforge_patch_number}"
 # Miniforge installer
 ARG miniforge_installer="${miniforge_python}-${miniforge_version}-Linux-${miniforge_arch}.sh"
 # Miniforge checksum
-ARG miniforge_checksum="6321775eb2c02d7f51d3a9004ce0be839099f126f4099c781531428536669560"
+ARG miniforge_checksum="5a827a62d98ba2217796a9dc7673380257ed7c161017565fba8ce785fb21a599"
 
 # Install all OS dependencies for notebook server that starts but lacks all
 # features (e.g., download as all possible file formats)
 ENV DEBIAN_FRONTEND noninteractive
-RUN apt-get update \
+RUN apt-get -q update \
  && apt-get install -yq --no-install-recommends \
     wget \
     ca-certificates \
@@ -118,7 +119,7 @@ RUN mkdir "/home/$NB_USER/work" && \
 # Install conda as jovyan and check the sha256 sum provided on the download site
 WORKDIR /tmp
 
-# Prerequisites installation: conda, pip, tini
+# Prerequisites installation: conda, mamba, pip, tini
 RUN wget --quiet "https://github.com/conda-forge/miniforge/releases/download/${miniforge_version}/${miniforge_installer}" && \
     echo "${miniforge_checksum} *${miniforge_installer}" | sha256sum --check && \
     /bin/bash "${miniforge_installer}" -f -b -p $CONDA_DIR && \
@@ -147,13 +148,13 @@ RUN wget --quiet "https://github.com/conda-forge/miniforge/releases/download/${m
 # Do all this in a single RUN command to avoid duplicating all of the
 # files across image layers when the permissions change
 RUN conda install --quiet --yes \
-    'notebook=6.1.6' \
+    'notebook=6.2.0' \
     'jupyterhub=1.3.0' \
-    'jupyterlab=2.2.9' && \
+    'jupyterlab=3.0.12' && \
     conda clean --all -f -y && \
     npm cache clean --force && \
     jupyter notebook --generate-config && \
-    rm -rf $CONDA_DIR/share/jupyter/lab/staging && \
+    jupyter lab clean && \
     rm -rf /home/$NB_USER/.cache/yarn && \
     fix-permissions $CONDA_DIR && \
     fix-permissions /home/$NB_USER
@@ -243,47 +244,33 @@ USER $NB_UID
 RUN conda install --quiet --yes \
     'beautifulsoup4=4.9.*' \
     'conda-forge::blas=*=openblas' \
-    'bokeh=2.2.*' \
+    'bokeh=2.3.*' \
     'bottleneck=1.3.*' \
     'cloudpickle=1.6.*' \
     'cython=0.29.*' \
-    'dask=2020.12.*' \
+    'dask=2021.3.*' \
     'dill=0.3.*' \
     'h5py=3.1.*' \
     'ipywidgets=7.6.*' \
-    'ipympl=0.5.*'\
+    'ipympl=0.6.*'\
     'matplotlib-base=3.3.*' \
-    'numba=0.52.*' \
+    'numba=0.53.*' \
     'numexpr=2.7.*' \
-    'pandas=1.1.*' \
+    'pandas=1.2.*' \
     'patsy=0.5.*' \
-    'protobuf=3.14.*' \
+    'protobuf=3.15.*' \
     'pytables=3.6.*' \
     'scikit-image=0.18.*' \
     'scikit-learn=0.24.*' \
-    'scipy=1.5.*' \
+    'scipy=1.6.*' \
     'seaborn=0.11.*' \
-    'sqlalchemy=1.3.*' \
+    'sqlalchemy=1.4.*' \
     'statsmodels=0.12.*' \
     'sympy=1.7.*' \
     'vincent=0.4.*' \
     'widgetsnbextension=3.5.*'\
-    'xlrd=1.2.*' \
-    && \
+    'xlrd=2.0.*' && \
     conda clean --all -f -y && \
-    # Activate ipywidgets extension in the environment that runs the notebook server
-    jupyter nbextension enable --py widgetsnbextension --sys-prefix && \
-    # Also activate ipywidgets extension for JupyterLab
-    # Check this URL for most recent compatibilities
-    # https://github.com/jupyter-widgets/ipywidgets/tree/master/packages/jupyterlab-manager
-    jupyter labextension install @jupyter-widgets/jupyterlab-manager@^2.0.0 --no-build && \
-    jupyter labextension install @bokeh/jupyter_bokeh@^2.0.0 --no-build && \
-    jupyter labextension install jupyter-matplotlib@^0.7.2 --no-build && \
-    jupyter lab build -y && \
-    jupyter lab clean -y && \
-    npm cache clean --force && \
-    rm -rf "/home/${NB_USER}/.cache/yarn" && \
-    rm -rf "/home/${NB_USER}/.node-gyp" && \
     fix-permissions "${CONDA_DIR}" && \
     fix-permissions "/home/${NB_USER}"
 
@@ -305,114 +292,14 @@ USER $NB_UID
 
 WORKDIR $HOME
 
-  ############################################################################
-  ################ Dependency: jupyter/datascience-notebook ##################
-  ############################################################################
-  
-# Copyright (c) Jupyter Development Team.
-# Distributed under the terms of the Modified BSD License.
-
-LABEL maintainer="Jupyter Project <jupyter@googlegroups.com>"
-
-# Set when building on Travis so that certain long-running build steps can
-# be skipped to shorten build time.
-ARG TEST_ONLY_BUILD
-
-# Fix DL4006
-SHELL ["/bin/bash", "-o", "pipefail", "-c"]
-
-USER root
-
-# Julia installation
-# Default values can be overridden at build time
-# (ARGS are in lower case to distinguish them from ENV)
-# Check https://julialang.org/downloads/
-ARG julia_version="1.5.3"
-# SHA256 checksum
-ARG julia_checksum="f190c938dd6fed97021953240523c9db448ec0a6760b574afd4e9924ab5615f1"
-
-# R pre-requisites
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    fonts-dejavu \
-    gfortran \
-    gcc && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-# Julia dependencies
-# install Julia packages in /opt/julia instead of $HOME
-ENV JULIA_DEPOT_PATH=/opt/julia \
-    JULIA_PKGDIR=/opt/julia \
-    JULIA_VERSION="${julia_version}"
-
-WORKDIR /tmp
-
-# hadolint ignore=SC2046
-RUN mkdir "/opt/julia-${JULIA_VERSION}" && \
-    wget -q https://julialang-s3.julialang.org/bin/linux/x64/$(echo "${JULIA_VERSION}" | cut -d. -f 1,2)"/julia-${JULIA_VERSION}-linux-x86_64.tar.gz" && \
-    echo "${julia_checksum} *julia-${JULIA_VERSION}-linux-x86_64.tar.gz" | sha256sum -c - && \
-    tar xzf "julia-${JULIA_VERSION}-linux-x86_64.tar.gz" -C "/opt/julia-${JULIA_VERSION}" --strip-components=1 && \
-    rm "/tmp/julia-${JULIA_VERSION}-linux-x86_64.tar.gz"
-RUN ln -fs /opt/julia-*/bin/julia /usr/local/bin/julia
-
-# Show Julia where conda libraries are \
-RUN mkdir /etc/julia && \
-    echo "push!(Libdl.DL_LOAD_PATH, \"$CONDA_DIR/lib\")" >> /etc/julia/juliarc.jl && \
-    # Create JULIA_PKGDIR \
-    mkdir "${JULIA_PKGDIR}" && \
-    chown "${NB_USER}" "${JULIA_PKGDIR}" && \
-    fix-permissions "${JULIA_PKGDIR}"
-
-USER $NB_UID
-
-# R packages including IRKernel which gets installed globally.
-RUN conda install --quiet --yes \
-    'r-base=4.0.3'  \
-    'r-caret=6.0*' \
-    'r-crayon=1.3*' \
-    'r-devtools=2.3*' \
-    'r-forecast=8.13*' \ 
-    'r-hexbin=1.28*' \
-    'r-htmltools=0.5*' \
-    'r-htmlwidgets=1.5*' \ 
-    'r-irkernel=1.1*' \
-    'r-nycflights13=1.0*' \
-    'r-randomforest=4.6*' \
-    'r-rcurl=1.98*' \
-    'r-rmarkdown=2.6*' \
-    'r-rsqlite=2.2*' \
-    'r-shiny=1.5*' \
-    'r-tidyverse=1.3*' \
-    'rpy2=3.3*' && \
-    conda clean --all -f -y && \
-    fix-permissions "${CONDA_DIR}" && \
-    fix-permissions "/home/${NB_USER}"
-
-# Add Julia packages. Only add HDF5 if this is not a test-only build since
-# it takes roughly half the entire build time of all of the images on Travis
-# to add this one package and often causes Travis to timeout.
-#
-# Install IJulia as jovyan and then move the kernelspec out
-# to the system share location. Avoids problems with runtime UID change not
-# taking effect properly on the .local folder in the jovyan home dir.
-RUN julia -e 'import Pkg; Pkg.update()' && \
-    (test $TEST_ONLY_BUILD || julia -e 'import Pkg; Pkg.add("HDF5")') && \
-    julia -e "using Pkg; pkg\"add IJulia\"; pkg\"precompile\"" && \
-    # move kernelspec out of home \
-    mv "${HOME}/.local/share/jupyter/kernels/julia"* "${CONDA_DIR}/share/jupyter/kernels/" && \
-    chmod -R go+rx "${CONDA_DIR}/share/jupyter" && \
-    rm -rf "${HOME}/.local" && \
-    fix-permissions "${JULIA_PKGDIR}" "${CONDA_DIR}/share/jupyter"
-
-WORKDIR $HOME
-
 ############################################################################
 ########################## Dependency: gpulibs #############################
 ############################################################################
 
 LABEL maintainer="Christoph Schranz <christoph.schranz@salzburgresearch.at>"
 
-# Install Tensorflow, check compatibility here: https://www.tensorflow.org/install/gpu
+# Install Tensorflow, check compatibility here:
+# https://www.tensorflow.org/install/source#gpu
 # installation via conda leads to errors in version 4.8.2
 RUN pip install --upgrade pip && \
     pip install --no-cache-dir "tensorflow==2.4.1" && \
@@ -420,25 +307,37 @@ RUN pip install --upgrade pip && \
 
 # Install PyTorch with dependencies
 RUN conda install --quiet --yes \
-    pyyaml mkl mkl-include setuptools cmake cffi typing
+    pyyaml mkl mkl-include setuptools cmake cffi typing && \
+    conda clean --all -f -y && \
+    fix-permissions $CONDA_DIR && \
+    fix-permissions /home/$NB_USER
 
-# Check compatibility here: https://pytorch.org/get-started/locally/
-RUN conda install --quiet --yes cudatoolkit=11.0
-#     pytorch \ 
-#     torchvision \
-     
-#    pip install torch_nightly -f https://download.pytorch.org/whl/nightly/cu90/torch_nightly.html && \
-#RUN pip install  --no-cache-dir torchviz
+# Check compatibility here:
+# https://pytorch.org/get-started/locally/
+# Installation via conda leads to errors installing cudatoolkit=11.1
+RUN pip install --no-cache-dir torch torchvision torchaudio torchviz
+
+USER root
+
+# Install nvtop to monitor the gpu tasks
+RUN apt-get update && \
+    apt-get install -y cmake libncurses5-dev libncursesw5-dev git && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN git clone https://github.com/Syllo/nvtop.git /run/nvtop && \
+    mkdir -p /run/nvtop/build && cd /run/nvtop/build && \
+    (cmake .. -DNVML_RETRIEVE_HEADER_ONLINE=True 2> /dev/null || echo "cmake was not successful") && \
+    (make 2> /dev/null || echo "make was not successful") && \
+    (make install 2> /dev/null || echo "make install was not successful") && \
+    cd /tmp && rm -rf /tmp/nvtop
+
+RUN fix-permissions /home/$NB_USER
 
 RUN conda install --quiet --yes -c rapidsai \ 
     rapids=0.18 \
     rapids-blazing=0.18
 
-RUN conda 
-# Clean installation
-RUN conda clean --all -f -y && \
-    fix-permissions $CONDA_DIR && \
-    fix-permissions /home/$NB_USER
+USER $NB_UID
 
   ############################################################################
   ############################ Useful packages ###############################
@@ -448,7 +347,7 @@ LABEL authors="Christoph Schranz <christoph.schranz@salzburgresearch.at>, Mathem
 
 USER root
 
-RUN pip install --no-cache-dir ipyleaflet plotly==4.8.* "ipywidgets>=7.5"
+RUN pip install --no-cache-dir ipyleaflet "plotly>=4.14.3" "ipywidgets>=7.5"
 
 # Install important packages and Graphviz
 RUN set -ex \
@@ -456,20 +355,22 @@ RUN set -ex \
     graphviz==0.11 \
 ' \
  && apt-get update \
- && apt-get -y install htop apt-utils graphviz libgraphviz-dev openssh-client \
+ && apt-get -y install htop apt-utils iputils-ping graphviz libgraphviz-dev openssh-client \
  && pip install --no-cache-dir $buildDeps
 
 # Install various extensions
 RUN fix-permissions $CONDA_DIR
-RUN jupyter labextension install @jupyterlab/github
-RUN jupyter labextension install jupyterlab-drawio
-RUN jupyter labextension install jupyter-leaflet
-RUN jupyter labextension install jupyterlab-plotly@4.8.1
-RUN jupyter labextension install @jupyter-widgets/jupyterlab-manager
-RUN pip install --no-cache-dir jupyter-tabnine==1.1.0  --user && \
-  jupyter nbextension install --py jupyter_tabnine --user && \
-  jupyter nbextension enable --py jupyter_tabnine --user && \
-  jupyter serverextension enable --py jupyter_tabnine --user
+
+# RUN jupyter labextension install @jupyterlab/github
+# RUN pip install jupyterlab-git
+RUN pip install jupyterlab-drawio
+RUN jupyter nbextension enable --py --sys-prefix ipyleaflet
+RUN jupyter labextension install jupyterlab-plotly
+RUN jupyter labextension install @jupyter-widgets/jupyterlab-manager plotlywidget
+# RUN pip install --no-cache-dir jupyter-tabnine  --user && \
+#   jupyter nbextension install --py jupyter_tabnine --user && \
+#   jupyter nbextension enable --py jupyter_tabnine --user && \
+#   jupyter serverextension enable --py jupyter_tabnine --user
 RUN pip install --no-cache-dir jupyter_contrib_nbextensions \
   jupyter_nbextensions_configurator rise
 #  jupyter nbextension enable codefolding/main
